@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMASH BATTLE - サポート & プライバシー</title>
+    <style>
+        :root {
+            --primary-color: #3333ff;
+            --bg-color: #f4f4f7;
+            --text-color: #333;
+            --card-bg: #ffffff;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: var(--primary-color);
+        }
+        h2 {
+            border-bottom: 2px solid var(--bg-color);
+            padding-bottom: 10px;
+            margin-top: 30px;
+        }
+        /* タブ切り替えボタン */
+        .tabs {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 30px;
+            border-bottom: 1px solid #ddd;
+        }
+        .tab-btn {
+            padding: 10px 20px;
+            background: none;
+            border: none;
+            font-size: 16px;
+            font-weight: bold;
+            color: #888;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+        .tab-btn.active {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--primary-color);
+        }
+        .tab-btn:hover {
+            color: var(--primary-color);
+        }
+        /* コンテンツエリア */
+        .content-section {
+            display: none; /* デフォルトは非表示 */
+            animation: fadeIn 0.5s;
+        }
+        .content-section.active {
+            display: block; /* アクティブなものだけ表示 */
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .contact-email {
+            background: #eee;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            text-align: center;
+            display: inline-block;
+        }
+        footer {
+            text-align: center;
+            margin-top: 50px;
+            font-size: 12px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>SMASH BATTLE</h1>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('support')" id="btn-support">サポート</button>
+        <button class="tab-btn" onclick="switchTab('privacy')" id="btn-privacy">プライバシーポリシー</button>
+    </div>
+
+    <div id="support" class="content-section active">
+        <h2>サポート情報</h2>
+        <p>アプリに関するご質問、不具合の報告、ご要望はこちらまでご連絡ください。</p>
+        
+        <h3>よくある質問 (FAQ)</h3>
+        <ul>
+            <li><strong>Q: 完全無料ですか？</strong><br>A: はい、最後まで無料で遊べます。</li>
+            <li><strong>Q: オフラインで遊べますか？</strong><br>A: はい、インターネット接続なしでプレイ可能です。</li>
+            <li><strong>Q: 音が出ません。</strong><br>A: 端末のマナーモード設定をご確認ください。</li>
+        </ul>
+
+        <h3>お問い合わせ</h3>
+        <p>以下のメールアドレスまでご連絡ください：</p>
+        <div style="text-align: center;">
+            <span class="contact-email">shinshin.3515@gmail.com</span>
+        </div>
+        <p><small>※ 返信には数日いただく場合がございます。</small></p>
+    </div>
+
+    <div id="privacy" class="content-section">
+        <h2>プライバシーポリシー</h2>
+        <p>「SMASH BATTLE」（以下、本アプリ）における利用者情報の取り扱いについて、以下の通り定めます。</p>
+
+        <h3>1. 収集する情報</h3>
+        <p>本アプリは、ユーザーの個人情報（名前、住所、メールアドレスなど）を収集しません。</p>
+
+        <h3>2. データの利用目的</h3>
+        <p>本アプリはオフラインで動作し、ゲームの進行状況などのデータはすべてご利用の端末内にのみ保存されます。開発者がこれらのデータにアクセスすることはありません。</p>
+
+        <h3>3. 第三者への提供</h3>
+        <p>本アプリは、個人情報を第三者に提供することはありません。</p>
+        
+        <h3>4. お問い合わせ</h3>
+        <p>プライバシーポリシーに関するご質問は、サポート窓口までご連絡ください。</p>
+    </div>
+
+</div>
+
+<footer>
+    &copy; 2024 Your Name / Studio Name. All rights reserved.
+</footer>
+
+<script>
+    // URLのハッシュ（#privacyなど）を見て、開くタブを決める機能
+    function init() {
+        const hash = window.location.hash.substring(1); // #を削除
+        if (hash === 'privacy') {
+            switchTab('privacy');
+        } else {
+            switchTab('support');
+        }
+    }
+
+    // タブ切り替え関数
+    function switchTab(tabName) {
+        // すべてのコンテンツを隠す
+        document.querySelectorAll('.content-section').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+
+        // 選択されたものを表示
+        document.getElementById(tabName).classList.add('active');
+        document.getElementById('btn-' + tabName).classList.add('active');
+
+        // URLのハッシュを書き換え（履歴に残さない）
+        history.replaceState(null, null, '#' + tabName);
+    }
+
+    // 読み込み時に実行
+    window.addEventListener('load', init);
+</script>
+
+</body>
+</html>
