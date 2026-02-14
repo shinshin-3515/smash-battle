@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Simple Smash JS - Horizontal Mode</title>
+    <style>
+        body {
+            background-color: #222;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            font-family: sans-serif;
+            overflow: hidden;
+        }
+        canvas {
+            background-color: #87CEEB;
+            border: 4px solid #fff;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        .ui {
+            display: flex;
+            justify-content: space-between;
+            width: 800px;
+            font-size: 24px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .p1-score { color: #3333ff; }
+        .p2-score { color: #ff3333; }
+        .controls {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #aaa;
+        }
+        #overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+        #start-btn {
+            padding: 20px 40px;
+            font-size: 30px;
+            background: #ff3333;
+            color: white;
+            border: 4px solid white;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #start-btn:hover { background: #cc0000; }
+    </style>
+</head>
+<body>
+
+    <div id="overlay">
+        <h1>SMASH BATTLE JS</h1>
+        <button id="start-btn">CLICK TO START</button>
+        <p>横っ飛びモード / Side KO Mode</p>
+    </div>
+
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
+    <div class="ui">
+        <div class="p1-score">P1 (YOU): <span id="p1-percent">0</span>%</div>
+        <div class="p2-score">CPU: <span id="p2-percent">0</span>%</div>
+    </div>
+    
+    <div class="controls">
+        移動: 矢印キー | Z: 弱攻撃 | X: 強攻撃 | C: シールド | リセット: R
+    </div>
+
+<script>
+/**
+ * 簡易オーディオエンジン
+ */
+const AudioEngine = {
+    ctx: null,
+    isPlaying: false,
+    bgmTimer: null,
+    noteIndex: 0,
+    
+    init() {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        this.ctx = new AudioContext();
+    },
+
+    playTone(freq, type, duration, vol = 0.1) {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + duration);
+    },
+
+    startBGM() {
+        if (this.isPlaying) return;
+        this.isPlaying = true;
+        const tempo = 150; 
+        const bassLine = [220, 220, 261, 220, 196, 196, 220, 220]; 
+        const melody =   [440, 523, 659, 523, 587, 523, 493, 440]; 
+
+        this.bgmTimer = setInterval(() => {
+            const beat = this.noteIndex % 8;
+            this.playTone(bassLine[beat] / 2, 'triangle', 0.3, 0.15);
+            if (Math.random() > 0.2) { 
+                let note = melody[beat];
+                if (beat % 2 === 0) note *= 2; 
+                this.playTone(note, 'square', 0.1, 0.05);
+            }
+            if (beat % 2 === 0) { 
+                this.playTone(100, 'square', 0.05, 0.2);
+            } else { 
+                this.playTone(150, 'sawtooth', 0.05, 0.1);
+            }
+            this.noteIndex++;
+        }, tempo);
+    },
+
+    playJump() { this.playTone(300, 'square', 0.1, 0.05); setTimeout(() => this.playTone(400, 'square', 0.1, 0.05), 50); },
+    playAttack() { this.playTone(150, 'triangle', 0.05, 0.1); },
+    playHit(isStrong) {
+        if (isStrong) { this.playTone(100, 'sawtooth', 0.3, 0.3); this.playTone(80, 'square', 0.3, 0.3); } 
+        else { this.playTone(200, 'sawtooth', 0.1, 0.1); }
+    },
+    playKO() { // 撃墜音
+        this.playTone(800, 'sawtooth', 0.1, 0.4);
+        setTimeout(() => this.playTone(600, 'sawtooth', 0.2, 0.4), 100);
+        setTimeout(() => this.playTone(400, 'sawtooth', 0.4, 0.4), 200);
+    }
+};
+
+// ================= ゲーム本体 =================
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const GRAVITY = 0.5;
+const FRICTION = 0.85; // 横滑りしやすくするために摩擦を少し減らす
+const GROUND_Y = 450;
+const STAGE_X = 150; // ステージを少し狭くして落ちやすくする
+const STAGE_WIDTH = 500;
+
+let gameRunning = false;
+
+const keys = { ArrowRight: false, ArrowLeft: false, ArrowUp: false, z: false, x: false, c: false, r: false };
+
+document.addEventListener('keydown', (e) => {
+    if(keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.key.toLowerCase())) {
+        keys[e.key.toLowerCase()] = true;
+        keys[e.key] = true;
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    if(keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.key.toLowerCase())) {
+        keys[e.key.toLowerCase()] = false;
+        keys[e.key] = false;
+    }
+});
+
+class Fighter {
+    constructor(x, y, color, isCpu = false) {
+        this.x = x;
+        this.y = y;
+        this.width = 40;
+        this.height = 60;
+        this.color = color;
+        this.vx = 0;
+        this.vy = 0;
+        this.speed = 5;
+        this.jumpPower = -12;
+        this.grounded = false;
+        this.jumpCount = 0;
+        this.maxJumps = 2;
+        this.percent = 0;
+        this.isCpu = isCpu;
+        this.isAttacking = false;
+        this.isShielding = false;
+        this.attackCooldown = 0;
+        this.stunTimer = 0;
+        this.attackBox = { x:0, y:0, w:0, h:0, active: false };
+        this.facingRight = true;
+    }
+
+    update(opponent) {
+        if (this.stunTimer > 0) {
+            this.stunTimer--;
+            this.applyPhysics();
+            this.checkBounds(); // 吹っ飛び中も画面外判定
+            return;
+        }
+
+        if (this.attackCooldown > 0) this.attackCooldown--;
+
+        if (this.isCpu) {
+            this.cpuAI(opponent);
+        } else {
+            this.handleInput();
+        }
+
+        this.applyPhysics();
+        this.checkBounds(); // 落下・画面外判定
+        
+        // 攻撃判定
+        if (this.isAttacking) {
+            this.attackBox.x = this.facingRight ? this.x + this.width : this.x - this.attackBox.w;
+            this.attackBox.y = this.y + 10;
+            
+            if (this.attackBox.active && this.checkCollision(this.attackBox, opponent)) {
+                if (!opponent.isShielding) {
+                    this.hit(opponent);
+                } else {
+                    this.vx = this.facingRight ? -5 : 5;
+                    AudioEngine.playTone(800, 'square', 0.05, 0.1); 
+                }
+                this.attackBox.active = false;
+            }
+        }
+    }
+
+    // 画面外判定（ここを強化）
+    checkBounds() {
+        const BORDER_X = 100; // 画面外の許容範囲
+        const BORDER_Y = 100;
+
+        // 右または左に行き過ぎたらアウト
+        if (this.x < -BORDER_X || this.x > canvas.width + BORDER_X || this.y > canvas.height + BORDER_Y) {
+            this.respawn();
+            AudioEngine.playKO(); 
+        }
+    }
+
+    handleInput() {
+        if (keys.c) {
+            this.isShielding = true;
+            this.vx *= 0.5;
+            return;
+        } else {
+            this.isShielding = false;
+        }
+
+        if (!this.isAttacking && this.attackCooldown <= 0) {
+            if (keys.z) this.startAttack('weak');
+            else if (keys.x) this.startAttack('strong');
+        }
+
+        if (!this.isAttacking) {
+            if (keys.ArrowRight) { this.vx += 1; this.facingRight = true; }
+            if (keys.ArrowLeft) { this.vx -= 1; this.facingRight = false; }
+        }
+
+        if (keys.ArrowUp && !this.prevJumpKey) {
+            if (this.jumpCount < this.maxJumps) {
+                this.vy = this.jumpPower;
+                this.jumpCount++;
+                this.grounded = false;
+                AudioEngine.playJump();
+            }
+        }
+        this.prevJumpKey = keys.ArrowUp;
+    }
+
+    cpuAI(target) {
+        const dx = target.x - this.x;
+        const dist = Math.abs(dx);
+
+        // 復帰優先
+        if (this.y > GROUND_Y || this.x < STAGE_X || this.x > STAGE_X + STAGE_WIDTH) {
+             const center = STAGE_X + STAGE_WIDTH / 2;
+             this.vx += this.x < center ? 0.8 : -0.8; // 中央に戻ろうとする
+             if(this.y > GROUND_Y && this.jumpCount < this.maxJumps) { 
+                 this.vy = this.jumpPower; 
+                 this.jumpCount++; 
+             }
+        }
+        else {
+            this.facingRight = dx > 0;
+            if (dist > 60) {
+                this.vx += dx > 0 ? 0.5 : -0.5;
+            } else {
+                if (Math.random() < 0.05 && this.attackCooldown <= 0) {
+                    const type = Math.random() < 0.7 ? 'weak' : 'strong';
+                    this.startAttack(type);
+                }
+            }
+            if (target.y < this.y - 50 && this.jumpCount < this.maxJumps && Math.random() < 0.05) {
+                this.vy = this.jumpPower;
+                this.jumpCount++;
+            }
+        }
+    }
+
+    startAttack(type) {
+        this.isAttacking = true;
+        this.attackType = type;
+        AudioEngine.playAttack(); 
+        
+        if (type === 'weak') {
+            this.attackBox.w = 40;
+            this.attackBox.h = 20;
+            this.attackFrame = 10;
+            this.attackCooldown = 20;
+        } else {
+            this.attackBox.w = 70; // リーチを少し長く
+            this.attackBox.h = 40;
+            this.attackFrame = 30;
+            this.attackCooldown = 60;
+        }
+        
+        this.attackBox.active = true;
+        setTimeout(() => {
+            this.isAttacking = false;
+            this.attackBox.active = false;
+        }, type === 'weak' ? 200 : 500);
+    }
+
+    // ヒット処理（吹っ飛びベクトル変更）
+    hit(opponent) {
+        let damage = 0;
+        let baseKnockback = 0;
+        let scaling = 0;
+        const isStrong = this.attackType === 'strong';
+
+        if (!isStrong) {
+            damage = 6;
+            baseKnockback = 8;
+            scaling = 0.05;
+        } else {
+            damage = 18;
+            baseKnockback = 15;
+            scaling = 0.15; // 吹っ飛び率アップ
+        }
+
+        AudioEngine.playHit(isStrong);
+        opponent.percent += damage;
+
+        // ベクトル計算
+        const kbForce = baseKnockback + (opponent.percent * scaling);
+        const dir = this.facingRight ? 1 : -1;
+        
+        // ★ここが変更点: 横ベクトルを強化、縦ベクトルを抑制
+        opponent.vx = dir * (kbForce * 1.5); // 横に1.5倍飛ぶ
+        opponent.vy = -kbForce * 0.4;        // 上にはあまり飛ばない（低い弾道）
+        
+        opponent.stunTimer = 15 + (opponent.percent * 0.3); // 硬直少し長め
+        opponent.grounded = false;
+    }
+
+    applyPhysics() {
+        this.vy += GRAVITY;
+        this.vx *= FRICTION;
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // 床判定
+        if (this.y + this.height >= GROUND_Y && 
+            this.y + this.height <= GROUND_Y + 20 &&
+            this.vy >= 0 &&
+            this.x + this.width > STAGE_X && 
+            this.x < STAGE_X + STAGE_WIDTH) {
+            
+            this.y = GROUND_Y - this.height;
+            this.vy = 0;
+            this.grounded = true;
+            this.jumpCount = 0;
+        } else {
+            this.grounded = false;
+        }
+    }
+
+    checkCollision(rect1, rect2) {
+        return (rect1.x < rect2.x + rect2.width &&
+                rect1.x + rect1.w > rect2.x &&
+                rect1.y < rect2.y + rect2.height &&
+                rect1.y + rect1.h > rect2.y);
+    }
+
+    respawn() {
+        // 中央上空から復活
+        this.x = canvas.width / 2;
+        this.y = 50;
+        this.vx = 0;
+        this.vy = 0;
+        this.percent = 0;
+        this.stunTimer = 0;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.fillStyle = this.color;
+        
+        // 吹っ飛び中は少し変形（疾走感）
+        if (Math.abs(this.vx) > 10) {
+            ctx.transform(1, 0, -0.2, 1, 0, 0); // 斜めにする
+        }
+
+        if (this.isShielding) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.strokeStyle = this.color;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(this.x + this.width/2, this.y + this.height/2, 40, 0, Math.PI*2);
+            ctx.fill();
+            ctx.stroke();
+        } else {
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+        }
+
+        if (this.stunTimer > 0 && Math.floor(Date.now() / 50) % 2 === 0) {
+            ctx.globalAlpha = 0.5;
+        }
+
+        // 目
+        ctx.fillStyle = 'white';
+        const eyeX = this.facingRight ? this.x + 25 : this.x + 5;
+        ctx.fillRect(eyeX, this.y + 10, 10, 10);
+
+        // 攻撃
+        if (this.isAttacking) {
+            ctx.fillStyle = this.attackType === 'weak' ? 'yellow' : 'orange';
+            ctx.fillRect(this.attackBox.x, this.attackBox.y, this.attackBox.w, this.attackBox.h);
+        }
+        ctx.restore();
+        
+        // 名前表示
+        ctx.fillStyle = this.isCpu ? 'red' : 'blue';
+        ctx.fillText(this.isCpu ? 'CPU' : 'P1', this.x, this.y - 10);
+    }
+}
+
+// ゲーム初期化
+const player = new Fighter(250, 100, '#3333ff');
+const cpu = new Fighter(550, 100, '#ff3333', true);
+const platforms = [
+    {x: STAGE_X + 100, y: GROUND_Y - 100, w: 150},
+    {x: STAGE_X + 350, y: GROUND_Y - 100, w: 150}
+];
+
+// スタートボタン
+document.getElementById('start-btn').addEventListener('click', () => {
+    document.getElementById('overlay').style.display = 'none';
+    AudioEngine.init();
+    AudioEngine.startBGM();
+    gameRunning = true;
+    gameLoop();
+});
+
+function gameLoop() {
+    if (!gameRunning) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // バーストライン（危険地帯）の可視化
+    ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+    ctx.fillRect(0, 0, 50, canvas.height); // 左
+    ctx.fillRect(canvas.width - 50, 0, 50, canvas.height); // 右
+
+    // ステージ描画
+    ctx.fillStyle = '#654321';
+    ctx.fillRect(STAGE_X, GROUND_Y, STAGE_WIDTH, 20);
+    ctx.fillStyle = '#555';
+    platforms.forEach(p => ctx.fillRect(p.x, p.y, p.w, 10));
+
+    // プラットフォーム判定
+    [player, cpu].forEach(p => {
+        platforms.forEach(plat => {
+             if (p.vy > 0 && 
+                p.y + p.height >= plat.y && 
+                p.y + p.height <= plat.y + 15 &&
+                p.x + p.width > plat.x && 
+                p.x < plat.x + plat.w) {
+                p.y = plat.y - p.height;
+                p.vy = 0;
+                p.grounded = true;
+                p.jumpCount = 0;
+            }
+        });
+    });
+
+    player.update(cpu);
+    cpu.update(player);
+
+    player.draw(ctx);
+    cpu.draw(ctx);
+
+    document.getElementById('p1-percent').innerText = Math.floor(player.percent);
+    document.getElementById('p2-percent').innerText = Math.floor(cpu.percent);
+    
+    if (keys.r) {
+        player.respawn();
+        cpu.respawn();
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+</script>
+</body>
+</html>
